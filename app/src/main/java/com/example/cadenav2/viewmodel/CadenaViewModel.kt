@@ -34,7 +34,11 @@ data class PuestoCadena(
     val puestosComprados: Int = 1,
     val valorCuotaIndividual: Int = 50000,
     val aporteTotalQuincenal: Int = 50000,
-    val pagadoQuincenaActual: Boolean = false
+    val pagadoQuincenaActual: Boolean = false,
+    // Campos de apoyo para consulta por celular y cambio obligatorio de clave
+    val celular: String = "",
+    val claveActual: String = "",
+    val debeCambiarClave: Boolean = true
 )
 
 // ============================================================================
@@ -143,6 +147,11 @@ class CadenaViewModel : ViewModel() {
                         ?: (comprados * cuotaIndividual)
                     val pagado = doc.getBoolean("pagadoQuincenaActual") ?: false
 
+                    // Leemos los campos usados para login por celular y clave inicial
+                    val celularTexto = normalizarCelular(doc.getString("celular").orEmpty())
+                    val claveTexto = doc.getString("claveActual").orEmpty()
+                    val cambiarClave = doc.getBoolean("debeCambiarClave") ?: true
+
                     PuestoCadena(
                         id = doc.id,
                         numeroPuesto = numero,
@@ -150,7 +159,10 @@ class CadenaViewModel : ViewModel() {
                         puestosComprados = comprados,
                         valorCuotaIndividual = cuotaIndividual,
                         aporteTotalQuincenal = aporteTotal,
-                        pagadoQuincenaActual = pagado
+                        pagadoQuincenaActual = pagado,
+                        celular = celularTexto,
+                        claveActual = claveTexto,
+                        debeCambiarClave = cambiarClave
                     )
                 }?.sortedBy { it.numeroPuesto } ?: emptyList()
 
@@ -246,15 +258,24 @@ class CadenaViewModel : ViewModel() {
     /**
      * Agrega un nuevo familiar/puesto a la colección "puestos" de Firestore.
      */
+    /**
+     * Agrega un nuevo familiar/puesto a la colección "puestos" de Firestore,
+     * incluyendo su celular y clave inicial con cambio obligatorio en el primer ingreso.
+     */
     fun guardarFamiliar(
         titular: String,
         puestosComprados: Int,
         numeroPuesto: Int,
-        valorCuota: Int
+        valorCuota: Int,
+        celular: String = "",
+        claveInicial: String = ""
     ) {
         val cantidadSegura = puestosComprados.coerceAtLeast(1)
         val cuotaSegura = valorCuota.coerceAtLeast(0)
         val aporteTotal = cantidadSegura * cuotaSegura
+        val celularLimpio = normalizarCelular(celular)
+        // Si no se especifica clave inicial, usamos una temporal simple (ej. "1234")
+        val claveSegura = claveInicial.trim().ifBlank { "1234" }
 
         val nuevoDocumento: Map<String, Any> = mapOf(
             "titular" to titular.trim(),
@@ -262,7 +283,10 @@ class CadenaViewModel : ViewModel() {
             "numeroPuesto" to numeroPuesto.coerceAtLeast(1),
             "valorCuotaIndividual" to cuotaSegura,
             "aporteTotalQuincenal" to aporteTotal,
-            "pagadoQuincenaActual" to false
+            "pagadoQuincenaActual" to false,
+            "celular" to celularLimpio,
+            "claveActual" to claveSegura,
+            "debeCambiarClave" to true
         )
 
         viewModelScope.launch {
@@ -552,5 +576,219 @@ class CadenaViewModel : ViewModel() {
                 _cargando.value = false
             }
         }
+    }
+
+    // ========================================================================
+    // BLOQUE 7: LOGIN POR CELULAR, CONSULTA Y CAMBIO OBLIGATORIO DE CLAVE
+    // Valida el ingreso del familiar usando su número de celular y contraseña,
+    // expone su sesión de consulta y actualiza su clave en Firestore.
+    // ========================================================================
+
+    /**
+     * Representa la sesión activa del familiar en la vista de consulta.
+     */
+    data class SesionConsultaUsuario(
+        val titular: String = "",
+        val celular: String = "",
+        val debeCambiarClave: Boolean = false
+    )
+
+    // Estado de la sesión de consulta del usuario (nulo cuando no ha iniciado sesión)
+    private val _sesionConsulta = MutableStateFlow<SesionConsultaUsuario?>(null)
+    val sesionConsulta: StateFlow<SesionConsultaUsuario?> = _sesionConsulta.asStateFlow()
+
+    /**
+     * Limpia espacios, guiones o prefijo de país (+57) para comparar celulares igual.
+     */
+    fun normalizarCelular(celularRaw: String): String {
+        val soloDigitos = celularRaw.filter { it.isDigit() }
+        return if (soloDigitos.length > 10 && soloDigitos.startsWith("57")) {
+            soloDigitos.removePrefix("57")
+        } else {
+            soloDigitos
+        }
+    }
+
+    /**
+     * Valida celular y contraseña contra los registros cargados en la cadena
+     * y abre la sesión de consulta del familiar.
+     */
+    fun iniciarSesionConsulta(
+        celularIngresado: String,
+        claveIngresada: String,
+        onResultado: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val celularBuscado = normalizarCelular(celularIngresado)
+        val claveBuscada = claveIngresada.trim()
+
+        if (celularBuscado.length < 7) {
+            onResultado(false, "Ingresa un número de celular válido.")
+            return
+        }
+        if (claveBuscada.isBlank()) {
+            onResultado(false, "Ingresa tu contraseña.")
+            return
+        }
+
+        // Buscamos el registro que coincida con el celular normalizado
+        val puestoCoincidente = _puestos.value.firstOrNull { puesto ->
+            normalizarCelular(puesto.celular) == celularBuscado
+        }
+
+        if (puestoCoincidente == null) {
+            onResultado(false, "No encontramos un familiar registrado con ese celular.")
+            return
+        }
+
+        // Si el puesto aún no tenía clave asignada en Firestore, aceptamos "1234" como inicial
+        val claveEsperada = puestoCoincidente.claveActual.ifBlank { "1234" }
+        if (claveBuscada != claveEsperada) {
+            onResultado(false, "Contraseña incorrecta.")
+            return
+        }
+
+        val sesionNueva = SesionConsultaUsuario(
+            titular = puestoCoincidente.titular,
+            celular = celularBuscado,
+            debeCambiarClave = puestoCoincidente.debeCambiarClave
+        )
+        _sesionConsulta.value = sesionNueva
+        onResultado(true, "Bienvenido/a, ${puestoCoincidente.titular}.")
+    }
+
+    /**
+     * Devuelve la lista de puestos pertenecientes a un titular específico.
+     */
+    fun obtenerPuestosDeTitular(nombreTitular: String): List<PuestoCadena> {
+        val objetivo = nombreTitular.trim()
+        if (objetivo.isBlank()) return emptyList()
+        return _puestos.value.filter { it.titular.trim().equals(objetivo, ignoreCase = true) }
+    }
+
+    /**
+     * Calcula cuánto debe aportar un titular en la quincena actual.
+     */
+    fun calcularAporteQuincenalUsuario(nombreTitular: String): Int {
+        val registros = obtenerPuestosDeTitular(nombreTitular)
+        if (registros.isEmpty()) return 0
+
+        val totalPuestos = if (registros.size > 1 && registros.all { it.puestosComprados == 1 }) {
+            registros.size
+        } else {
+            registros.sumOf { it.puestosComprados }.coerceAtLeast(registros.size)
+        }
+
+        val cuotaUnitaria = registros.first().valorCuotaIndividual.takeIf { it > 0 }
+            ?: _valorCuotaBase.value
+
+        return totalPuestos * cuotaUnitaria
+    }
+
+    /**
+     * Indica si el titular tiene todos sus puestos marcados como pagados hoy.
+     */
+    fun usuarioEstaAlDiaEnQuincena(nombreTitular: String): Boolean {
+        val registros = obtenerPuestosDeTitular(nombreTitular)
+        return registros.isNotEmpty() && registros.all { it.pagadoQuincenaActual }
+    }
+
+    /**
+     * Registra en Firestore los datos de acceso (celular, clave inicial y
+     * debeCambiarClave = true) para los puestos de un familiar.
+     */
+    fun configurarAccesoFamiliar(
+        titular: String,
+        celular: String,
+        claveInicial: String
+    ) {
+        val celularLimpio = normalizarCelular(celular)
+        val claveLimpia = claveInicial.trim()
+        if (titular.isBlank() || celularLimpio.isBlank() || claveLimpia.isBlank()) {
+            _mensajeEstado.value = "Completa nombre, celular y clave inicial."
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val snapshot = db.collection("puestos").get().await()
+                val lote = db.batch()
+                val datosAcceso: Map<String, Any> = mapOf(
+                    "celular" to celularLimpio,
+                    "claveActual" to claveLimpia,
+                    "debeCambiarClave" to true
+                )
+
+                for (doc in snapshot.documents) {
+                    val nombreDoc = doc.getString("titular")?.trim().orEmpty()
+                    if (nombreDoc.equals(titular.trim(), ignoreCase = true)) {
+                        lote.update(doc.reference, datosAcceso)
+                    }
+                }
+
+                lote.commit().await()
+                _mensajeEstado.value = "Acceso configurado para $titular (cambio obligatorio en 1er ingreso)."
+            } catch (e: Exception) {
+                _mensajeEstado.value = "Error al configurar acceso: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    /**
+     * Actualiza la contraseña del usuario en sesión y desactiva la obligación
+     * de cambiar clave en su primer ingreso.
+     */
+    fun completarCambioClaveObligatorio(
+        nuevaClave: String,
+        onResultado: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val sesionActual = _sesionConsulta.value
+        val claveNuevaLimpia = nuevaClave.trim()
+
+        if (sesionActual == null) {
+            onResultado(false, "No hay una sesión de consulta activa.")
+            return
+        }
+        if (claveNuevaLimpia.length < 4) {
+            onResultado(false, "La nueva contraseña debe tener al menos 4 caracteres.")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val snapshot = db.collection("puestos").get().await()
+                val lote = db.batch()
+                val cambiosClave: Map<String, Any> = mapOf(
+                    "claveActual" to claveNuevaLimpia,
+                    "debeCambiarClave" to false
+                )
+
+                for (doc in snapshot.documents) {
+                    val nombreDoc = doc.getString("titular")?.trim().orEmpty()
+                    val celDoc = normalizarCelular(doc.getString("celular").orEmpty())
+                    val coincideNombre = nombreDoc.equals(sesionActual.titular.trim(), ignoreCase = true)
+                    val coincideCelular = sesionActual.celular.isNotBlank() && celDoc == sesionActual.celular
+
+                    if (coincideNombre || coincideCelular) {
+                        lote.update(doc.reference, cambiosClave)
+                    }
+                }
+
+                lote.commit().await()
+                _sesionConsulta.value = sesionActual.copy(debeCambiarClave = false)
+                _mensajeEstado.value = "Contraseña actualizada correctamente."
+                onResultado(true, "Contraseña actualizada.")
+            } catch (e: Exception) {
+                val msg = "Error al actualizar clave: ${e.localizedMessage}"
+                _mensajeEstado.value = msg
+                onResultado(false, msg)
+            }
+        }
+    }
+
+    /**
+     * Cierra la sesión actual de consulta del usuario.
+     */
+    fun cerrarSesionConsulta() {
+        _sesionConsulta.value = null
     }
 }

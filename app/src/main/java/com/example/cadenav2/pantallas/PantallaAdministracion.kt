@@ -5,7 +5,7 @@ package com.example.cadenav2.pantallas
 // Aquí importamos las clases de Android, Compose y Material 3 que necesita
 // la pantalla, y definimos tipos simples para ordenar datos y el menú lateral.
 // ============================================================================
-
+import androidx.activity.compose.BackHandler
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -276,68 +276,21 @@ fun PantallaAdministracion(
         0f
     }
 
-    // ========================================================================
-    // BLOQUE 3: NAVEGACIÓN A LAS PANTALLAS SECUNDARIAS
-    // Si el usuario eligió una opción del menú lateral, mostramos la pantalla
-    // correspondiente y le pasamos la función "onVolver" para regresar aquí.
-    // ========================================================================
+    // ============================================================================
+// BLOQUE 3: NAVEGACIÓN A LAS PANTALLAS SECUNDARIAS Y GESTO ATRÁS
+// Intercepta el gesto o botón "Atrás" del teléfono para cerrar el menú si
+// está abierto, o regresar al panel principal antes de salir de la app.
+// ============================================================================
     val volverAlPanel: () -> Unit = { vistaActiva = VistaAdminActiva.PANEL_GENERAL }
 
-    when (vistaActiva) {
-        VistaAdminActiva.RESUMEN_CICLO -> {
-            PantallaResumenCiclo(viewModel = viewModel, onVolver = volverAlPanel, modifier = modifier)
-            return
-        }
-        VistaAdminActiva.CRONOGRAMA_GLOBAL -> {
-            PantallaCronogramaGlobal(viewModel = viewModel, onVolver = volverAlPanel, modifier = modifier)
-            return
-        }
-        VistaAdminActiva.GESTION_MIEMBROS_AGREGAR -> {
-            PantallaGestionMiembros(
-                viewModel = viewModel,
-                onVolver = volverAlPanel,
-                modoInicial = "ANADIR",
-                modifier = modifier
-            )
-            return
-        }
-        VistaAdminActiva.GESTION_MIEMBROS_EDITAR -> {
-            PantallaGestionMiembros(
-                viewModel = viewModel,
-                onVolver = volverAlPanel,
-                modoInicial = "EDITAR",
-                modifier = modifier
-            )
-            return
-        }
-        VistaAdminActiva.GESTION_MIEMBROS_TURNOS -> {
-            PantallaGestionMiembros(
-                viewModel = viewModel,
-                onVolver = volverAlPanel,
-                modoInicial = "INTERCAMBIAR",
-                modifier = modifier
-            )
-            return
-        }
-        VistaAdminActiva.GESTION_MIEMBROS_ELIMINAR -> {
-            PantallaGestionMiembros(
-                viewModel = viewModel,
-                onVolver = volverAlPanel,
-                modoInicial = "ELIMINAR",
-                modifier = modifier
-            )
-            return
-        }
-        VistaAdminActiva.CORREGIR_PAGOS -> {
-            PantallaCorregirPagos(viewModel = viewModel, onVolver = volverAlPanel, modifier = modifier)
-            return
-        }
-        VistaAdminActiva.AJUSTES_CADENA -> {
-            PantallaAjustesCadena(viewModel = viewModel, onVolver = volverAlPanel, modifier = modifier)
-            return
-        }
-        VistaAdminActiva.PANEL_GENERAL -> {
-            // Continúa hacia el panel principal de la quincena
+    BackHandler(enabled = drawerState.isOpen || vistaActiva != VistaAdminActiva.PANEL_GENERAL) {
+        when {
+            drawerState.isOpen -> {
+                scope.launch { drawerState.close() }
+            }
+            vistaActiva != VistaAdminActiva.PANEL_GENERAL -> {
+                volverAlPanel()
+            }
         }
     }
 
