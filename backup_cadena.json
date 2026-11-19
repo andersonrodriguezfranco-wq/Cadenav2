@@ -1,0 +1,207 @@
+{
+  "formato": 2,
+  "fechaExportacion": "2026-11-17T16:36:12.238545",
+  "configuracion": {
+    "valorPuesto": 50000,
+    "fechaInicio": "2026-01-15",
+    "quincenaActiva": 5,
+    "incluirAporteBeneficiario": false,
+    "fecha": "2026-01-15"
+  },
+  "puestos": [
+    {
+      "id": 1,
+      "nombre": "ANDERSON",
+      "comprados": 1,
+      "asignados": "1"
+    },
+    {
+      "id": 2,
+      "nombre": "JHIMER",
+      "comprados": 1,
+      "asignados": "2"
+    },
+    {
+      "id": 3,
+      "nombre": "ERIKA",
+      "comprados": 2,
+      "asignados": "3,11"
+    },
+    {
+      "id": 4,
+      "nombre": "TATIS",
+      "comprados": 2,
+      "asignados": "4,6"
+    },
+    {
+      "id": 5,
+      "nombre": "MAYE",
+      "comprados": 2,
+      "asignados": "5,12"
+    },
+    {
+      "id": 6,
+      "nombre": "DANNY",
+      "comprados": 1,
+      "asignados": "7"
+    },
+    {
+      "id": 7,
+      "nombre": "LEIDY",
+      "comprados": 3,
+      "asignados": "8,14,17"
+    },
+    {
+      "id": 8,
+      "nombre": "ALEXA",
+      "comprados": 2,
+      "asignados": "9,13"
+    },
+    {
+      "id": 9,
+      "nombre": "YOBIS",
+      "comprados": 1,
+      "asignados": "10"
+    },
+    {
+      "id": 10,
+      "nombre": "BENNY",
+      "comprados": 1,
+      "asignados": "15"
+    },
+    {
+      "id": 11,
+      "nombre": "SOFIA",
+      "comprados": 2,
+      "asignados": "16,18"
+    }
+  ],
+  "pagos": [
+    {
+      "puestoId": 4,
+      "quincena": 3,
+      "monto": 100000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 1,
+      "quincena": 4,
+      "monto": 50000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 2,
+      "quincena": 4,
+      "monto": 50000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 3,
+      "quincena": 4,
+      "monto": 100000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 5,
+      "quincena": 4,
+      "monto": 100000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 6,
+      "quincena": 4,
+      "monto": 50000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 7,
+      "quincena": 4,
+      "monto": 150000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 8,
+      "quincena": 4,
+      "monto": 100000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 9,
+      "quincena": 4,
+      "monto": 50000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 10,
+      "quincena": 4,
+      "monto": 50000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 11,
+      "quincena": 4,
+      "monto": 100000,
+      "fecha": "2026-11-10T19:46:15"
+    },
+    {
+      "puestoId": 1,
+      "quincena": 5,
+      "monto": 50000,
+      "fecha": "2026-11-17T16:29:39.565552"
+    },
+    {
+      "puestoId": 2,
+      "quincena": 5,
+      "monto": 50000,
+      "fecha": "2026-11-17T16:29:29.294421"
+    },
+    {
+      "puestoId": 3,
+      "quincena": 5,
+      "monto": 100000,
+      "fecha": "2026-11-17T16:29:31.274508"
+    },
+    {
+      "puestoId": 4,
+      "quincena": 5,
+      "monto": 100000,
+      "fecha": "2026-11-17T16:29:32.465248"
+    },
+    {
+      "puestoId": 6,
+      "quincena": 5,
+      "monto": 50000,
+      "fecha": "2026-11-17T16:29:33.278527"
+    },
+    {
+      "puestoId": 7,
+      "quincena": 5,
+      "monto": 150000,
+      "fecha": "2026-11-17T16:29:34.436390"
+    },
+    {
+      "puestoId": 8,
+      "quincena": 5,
+      "monto": 100000,
+      "fecha": "2026-11-17T16:29:35.234509"
+    },
+    {
+      "puestoId": 9,
+      "quincena": 5,
+      "monto": 50000,
+      "fecha": "2026-11-17T16:29:35.837327"
+    },
+    {
+      "puestoId": 10,
+      "quincena": 5,
+      "monto": 50000,
+      "fecha": "2026-11-17T16:29:36.666093"
+    },
+    {
+      "puestoId": 11,
+      "quincena": 5,
+      "monto": 100000,
+      "fecha": "2026-11-17T16:29:37.588663"
+    }
+  ]
+}
