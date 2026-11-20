@@ -2,8 +2,8 @@ package com.example.cadenav2.viewmodel
 
 // ============================================================================
 // BLOQUE 1: IMPORTACIONES Y MODELO DE DATOS DEL PUESTO
-// Aquí traemos las herramientas de ViewModel, corrutinas y Firestore, y
-// definimos la estructura de un puesto dentro de la cadena.
+// Importa las clases de ViewModel, corrutinas, Firestore y JSON, y define la
+// estructura PuestoCadena con los campos de cuota, pago y acceso por celular.
 // ============================================================================
 
 import android.content.Context
@@ -24,8 +24,8 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 /**
- * Representa un puesto registrado en la cadena.
- * Cada propiedad guarda un dato importante para calcular cuotas, turnos y pagos.
+ * Representa un puesto registrado dentro de la cadena familiar.
+ * Contiene los datos de turno, aporte, pago en la quincena y credenciales.
  */
 data class PuestoCadena(
     val id: String = "",
@@ -35,7 +35,6 @@ data class PuestoCadena(
     val valorCuotaIndividual: Int = 50000,
     val aporteTotalQuincenal: Int = 50000,
     val pagadoQuincenaActual: Boolean = false,
-    // Campos de apoyo para consulta por celular y cambio obligatorio de clave
     val celular: String = "",
     val claveActual: String = "",
     val debeCambiarClave: Boolean = true
@@ -43,48 +42,47 @@ data class PuestoCadena(
 
 // ============================================================================
 // BLOQUE 2: CLASE CADENAVIEWMODEL Y FLUJOS DE ESTADO (STATEFLOW)
-// El ViewModel guarda los datos de la pantalla y sobrevive a rotaciones.
-// MutableStateFlow permite cambiar valores dentro del ViewModel;
-// StateFlow expone esos valores como de solo lectura hacia las pantallas.
+// Mantiene los estados reactivos que observa la interfaz de Compose:
+// puestos, quincenaActual, valorCuotaBase, cargando y mensajeEstado.
 // ============================================================================
 
 class CadenaViewModel : ViewModel() {
 
-    // Instancia única de Cloud Firestore para leer y escribir en la nube
+    // Cliente principal de Cloud Firestore para sincronizar datos en la nube
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
 
-    // Escuchadores activos en tiempo real para liberar recursos al cerrar el ViewModel
+    // Referencias a los listeners activos para limpiarlos al destruir el ViewModel
     private var escuchadorPuestos: ListenerRegistration? = null
     private var escuchadorConfig: ListenerRegistration? = null
 
-    // Lista de todos los puestos cargados desde Firestore
+    // Flujo con la lista ordenada de puestos de la cadena
     private val _puestos = MutableStateFlow<List<PuestoCadena>>(emptyList())
     val puestos: StateFlow<List<PuestoCadena>> = _puestos.asStateFlow()
 
-    // Número de la quincena que se está jugando actualmente (inicia en 1)
+    // Flujo con el número de quincena activa
     private val _quincenaActual = MutableStateFlow(1)
     val quincenaActual: StateFlow<Int> = _quincenaActual.asStateFlow()
 
-    // Valor base por defecto de cada puesto en pesos (ej. 50000)
+    // Flujo con el valor base de cuota por puesto en pesos
     private val _valorCuotaBase = MutableStateFlow(50000)
     val valorCuotaBase: StateFlow<Int> = _valorCuotaBase.asStateFlow()
 
-    // Indica si hay una operación cargando o guardando en este momento
+    // Indica si hay alguna operación en curso
     private val _cargando = MutableStateFlow(false)
     val cargando: StateFlow<Boolean> = _cargando.asStateFlow()
 
-    // Mensaje corto para mostrar cómo va la sincronización o la última acción
+    // Mensaje de estado o error de la última acción ejecutada
     private val _mensajeEstado = MutableStateFlow("")
     val mensajeEstado: StateFlow<String> = _mensajeEstado.asStateFlow()
 
-    // Bloque "init": se ejecuta automáticamente apenas se crea el ViewModel
     init {
+        // Inicia la escucha en tiempo real de configuración y puestos
         observarConfiguracion()
         observarPuestos()
     }
 
-    // Se ejecuta cuando la pantalla/ViewModel se destruye para evitar fugas de memoria
     override fun onCleared() {
+        // Detiene los listeners cuando el ViewModel se destruye
         escuchadorPuestos?.remove()
         escuchadorConfig?.remove()
         super.onCleared()
@@ -92,13 +90,13 @@ class CadenaViewModel : ViewModel() {
 
     // ========================================================================
     // BLOQUE 3: SINCRONIZACIÓN EN TIEMPO REAL CON FIRESTORE
-    // Escucha cambios en la configuración general y en la colección de puestos
-    // para que todas las pantallas muestren siempre información actualizada.
+    // Escucha el documento configuracion/general y la colección puestos para
+    // mantener la pantalla sincronizada con los cambios en Firestore.
     // ========================================================================
 
     /**
-     * Escucha el documento configuracion/general para obtener quincenaActual
-     * y valorCuotaBase en tiempo real.
+     * Escucha cambios en configuracion/general para actualizar quincenaActual
+     * y valorCuotaBase.
      */
     private fun observarConfiguracion() {
         escuchadorConfig = db.collection("configuracion")
@@ -124,7 +122,8 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Escucha la colección "puestos" y convierte cada documento en un PuestoCadena.
+     * Escucha cambios en la colección "puestos", convierte cada documento en
+     * PuestoCadena y ordena el resultado por numeroPuesto.
      */
     private fun observarPuestos() {
         _cargando.value = true
@@ -146,8 +145,6 @@ class CadenaViewModel : ViewModel() {
                     val aporteTotal = doc.getLong("aporteTotalQuincenal")?.toInt()
                         ?: (comprados * cuotaIndividual)
                     val pagado = doc.getBoolean("pagadoQuincenaActual") ?: false
-
-                    // Leemos los campos usados para login por celular y clave inicial
                     val celularTexto = normalizarCelular(doc.getString("celular").orEmpty())
                     val claveTexto = doc.getString("claveActual").orEmpty()
                     val cambiarClave = doc.getBoolean("debeCambiarClave") ?: true
@@ -172,17 +169,17 @@ class CadenaViewModel : ViewModel() {
 
     // ========================================================================
     // BLOQUE 4: PAGOS Y CIERRE DE QUINCENA
-    // Permite marcar/desmarcar el pago de un titular en la quincena activa y
-    // avanzar a la siguiente quincena cuando todos hayan completado su aporte.
+    // Marca o desmarca el pago de un titular en la quincena activa y permite
+    // cerrar la quincena reiniciando pagos y avanzando la quincena.
     // ========================================================================
 
     /**
-     * Marca o desmarca pagadoQuincenaActual para todos los puestos de un titular.
+     * Cambia el estado pagadoQuincenaActual para todos los puestos de un titular,
+     * primero en memoria y luego en lote dentro de Firestore.
      */
     fun alternarPagoTitular(titular: String, marcadoComoPagado: Boolean) {
         if (titular.isBlank()) return
 
-        // Actualización optimista local para respuesta visual inmediata
         _puestos.value = _puestos.value.map { puesto ->
             if (puesto.titular.equals(titular.trim(), ignoreCase = true)) {
                 puesto.copy(pagadoQuincenaActual = marcadoComoPagado)
@@ -217,8 +214,8 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Cierra la quincena actual: limpia pagadoQuincenaActual en todos los puestos
-     * y suma 1 a quincenaActual en Firestore.
+     * Cierra la quincena activa: reinicia pagadoQuincenaActual a false en todos
+     * los puestos e incrementa quincenaActual en configuracion/general.
      */
     fun cerrarQuincenaActual() {
         val siguienteQuincena = _quincenaActual.value + 1
@@ -251,16 +248,13 @@ class CadenaViewModel : ViewModel() {
 
     // ========================================================================
     // BLOQUE 5: GESTIÓN DE FAMILIARES Y TURNOS
-    // Conecta con PantallaGestionMiembros para agregar, editar, intercambiar
-    // turnos y eliminar familiares en Cloud Firestore.
+    // Crea, edita, intercambia turnos y elimina familiares o puestos en
+    // Cloud Firestore.
     // ========================================================================
 
     /**
-     * Agrega un nuevo familiar/puesto a la colección "puestos" de Firestore.
-     */
-    /**
-     * Agrega un nuevo familiar/puesto a la colección "puestos" de Firestore,
-     * incluyendo su celular y clave inicial con cambio obligatorio en el primer ingreso.
+     * Crea un nuevo registro en "puestos" incluyendo celular normalizado,
+     * clave inicial y debeCambiarClave en true.
      */
     fun guardarFamiliar(
         titular: String,
@@ -274,7 +268,6 @@ class CadenaViewModel : ViewModel() {
         val cuotaSegura = valorCuota.coerceAtLeast(0)
         val aporteTotal = cantidadSegura * cuotaSegura
         val celularLimpio = normalizarCelular(celular)
-        // Si no se especifica clave inicial, usamos una temporal simple (ej. "1234")
         val claveSegura = claveInicial.trim().ifBlank { "1234" }
 
         val nuevoDocumento: Map<String, Any> = mapOf(
@@ -300,7 +293,8 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Edita el nombre y la cantidad de puestos de un familiar existente.
+     * Actualiza el nombre del titular, la cantidad de puestos y la cuota
+     * individual en Firestore.
      */
     fun editarFamiliar(
         titularAnterior: String,
@@ -339,7 +333,7 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Intercambia los números de puesto (turnos de quincena) entre dos familiares.
+     * Intercambia los números de puesto (turnos) entre dos titulares.
      */
     fun intercambiarTurnos(
         primerTitular: String,
@@ -386,7 +380,7 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Elimina todos los puestos asociados a un familiar en Firestore.
+     * Elimina todos los documentos de puestos asociados a un titular.
      */
     fun eliminarFamiliar(titular: String) {
         viewModelScope.launch {
@@ -411,11 +405,12 @@ class CadenaViewModel : ViewModel() {
 
     // ========================================================================
     // BLOQUE 6: AJUSTES GENERALES, LIMPIEZA TOTAL Y RESPALDOS (.JSON)
-    // Conecta con PantallaAjustesCadena y las opciones de backup del menú.
+    // Guarda ajustes generales, reinicia la cadena y exporta o importa
+    // respaldos en formato JSON.
     // ========================================================================
 
     /**
-     * Guarda el nuevo valor de cuota por puesto y la quincena activa.
+     * Guarda el valor de cuota base y la quincena activa en estado y Firestore.
      */
     fun guardarAjustesCadena(
         nuevoValorCuota: Int,
@@ -442,7 +437,7 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Borra todos los puestos y reinicia quincenaActual a 1 en Firestore.
+     * Borra todos los puestos y restablece quincenaActual a 1.
      */
     fun finalizarYLimpiarCadena() {
         viewModelScope.launch {
@@ -472,7 +467,7 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Exporta la configuración y todos los puestos actuales a un archivo .json.
+     * Exporta la configuración y la lista de puestos a un archivo .json.
      */
     fun exportarRespaldoHaciaUri(context: Context, uriDestino: Uri) {
         viewModelScope.launch {
@@ -491,6 +486,9 @@ class CadenaViewModel : ViewModel() {
                             put("valorCuotaIndividual", puesto.valorCuotaIndividual)
                             put("aporteTotalQuincenal", puesto.aporteTotalQuincenal)
                             put("pagadoQuincenaActual", puesto.pagadoQuincenaActual)
+                            put("celular", puesto.celular)
+                            put("claveActual", puesto.claveActual)
+                            put("debeCambiarClave", puesto.debeCambiarClave)
                         }
                         arregloPuestos.put(itemJson)
                     }
@@ -510,7 +508,7 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Lee un archivo .json de respaldo y restaura puestos y configuración en Firestore.
+     * Importa un archivo .json de respaldo y reemplaza los puestos en Firestore.
      */
     fun importarRespaldoDesdeUri(context: Context, uriOrigen: Uri) {
         viewModelScope.launch {
@@ -535,12 +533,10 @@ class CadenaViewModel : ViewModel() {
                 val snapshotActual = db.collection("puestos").get().await()
                 val lote = db.batch()
 
-                // Primero borramos los puestos actuales para evitar duplicados al restaurar
                 for (doc in snapshotActual.documents) {
                     lote.delete(doc.reference)
                 }
 
-                // Luego agregamos los puestos del archivo de respaldo
                 for (i in 0 until arregloPuestos.length()) {
                     val obj = arregloPuestos.optJSONObject(i) ?: continue
                     val comprados = obj.optInt("puestosComprados", 1).coerceAtLeast(1)
@@ -553,7 +549,10 @@ class CadenaViewModel : ViewModel() {
                         "puestosComprados" to comprados,
                         "valorCuotaIndividual" to cuotaInd,
                         "aporteTotalQuincenal" to aporte,
-                        "pagadoQuincenaActual" to obj.optBoolean("pagadoQuincenaActual", false)
+                        "pagadoQuincenaActual" to obj.optBoolean("pagadoQuincenaActual", false),
+                        "celular" to normalizarCelular(obj.optString("celular", "")),
+                        "claveActual" to obj.optString("claveActual", "1234"),
+                        "debeCambiarClave" to obj.optBoolean("debeCambiarClave", true)
                     )
                     val nuevaRef = db.collection("puestos").document()
                     lote.set(nuevaRef, docNuevo)
@@ -579,26 +578,31 @@ class CadenaViewModel : ViewModel() {
     }
 
     // ========================================================================
-    // BLOQUE 7: LOGIN POR CELULAR, CONSULTA Y CAMBIO OBLIGATORIO DE CLAVE
-    // Valida el ingreso del familiar usando su número de celular y contraseña,
-    // expone su sesión de consulta y actualiza su clave en Firestore.
+    // BLOQUE 7: LOGIN POR CELULAR, SESIÓN Y CAMBIO OBLIGATORIO DE CLAVE
+    // Gestiona el acceso por teléfono celular (administrador o familiar), la
+    // sesión activa y el cambio obligatorio de contraseña en el primer ingreso.
     // ========================================================================
 
-    /**
-     * Representa la sesión activa del familiar en la vista de consulta.
-     */
-    data class SesionConsultaUsuario(
-        val titular: String = "",
-        val celular: String = "",
+    enum class RolUsuario {
+        ADMIN,
+        USUARIO
+    }
+
+    data class SesionActiva(
+        val rol: RolUsuario,
+        val nombreMostrado: String,
+        val celular: String,
         val debeCambiarClave: Boolean = false
     )
 
-    // Estado de la sesión de consulta del usuario (nulo cuando no ha iniciado sesión)
-    private val _sesionConsulta = MutableStateFlow<SesionConsultaUsuario?>(null)
-    val sesionConsulta: StateFlow<SesionConsultaUsuario?> = _sesionConsulta.asStateFlow()
+    private val celularAdminConfigurado = normalizarCelular("3173699663")
+    private val claveAdminConfigurada = "Andromeda26."
+
+    private val _sesionActiva = MutableStateFlow<SesionActiva?>(null)
+    val sesionActiva: StateFlow<SesionActiva?> = _sesionActiva.asStateFlow()
 
     /**
-     * Limpia espacios, guiones o prefijo de país (+57) para comparar celulares igual.
+     * Limpia espacios, guiones o prefijo 57 para comparar celulares igual.
      */
     fun normalizarCelular(celularRaw: String): String {
         val soloDigitos = celularRaw.filter { it.isDigit() }
@@ -610,54 +614,66 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Valida celular y contraseña contra los registros cargados en la cadena
-     * y abre la sesión de consulta del familiar.
+     * Valida celular y clave para abrir sesión de administrador o familiar.
      */
-    fun iniciarSesionConsulta(
+    fun iniciarSesionPorCelular(
         celularIngresado: String,
         claveIngresada: String,
         onResultado: (Boolean, String) -> Unit = { _, _ -> }
     ) {
-        val celularBuscado = normalizarCelular(celularIngresado)
-        val claveBuscada = claveIngresada.trim()
+        val celularLimpio = normalizarCelular(celularIngresado)
+        val claveLimpia = claveIngresada.trim()
 
-        if (celularBuscado.length < 7) {
+        if (celularLimpio.length < 7) {
             onResultado(false, "Ingresa un número de celular válido.")
             return
         }
-        if (claveBuscada.isBlank()) {
+        if (claveLimpia.isBlank()) {
             onResultado(false, "Ingresa tu contraseña.")
             return
         }
 
-        // Buscamos el registro que coincida con el celular normalizado
-        val puestoCoincidente = _puestos.value.firstOrNull { puesto ->
-            normalizarCelular(puesto.celular) == celularBuscado
-        }
-
-        if (puestoCoincidente == null) {
-            onResultado(false, "No encontramos un familiar registrado con ese celular.")
+        if (celularLimpio == celularAdminConfigurado) {
+            if (claveLimpia == claveAdminConfigurada) {
+                _sesionActiva.value = SesionActiva(
+                    rol = RolUsuario.ADMIN,
+                    nombreMostrado = "Administrador",
+                    celular = celularLimpio,
+                    debeCambiarClave = false
+                )
+                onResultado(true, "Bienvenido, Administrador.")
+            } else {
+                onResultado(false, "Contraseña de administrador incorrecta.")
+            }
             return
         }
 
-        // Si el puesto aún no tenía clave asignada en Firestore, aceptamos "1234" como inicial
-        val claveEsperada = puestoCoincidente.claveActual.ifBlank { "1234" }
-        if (claveBuscada != claveEsperada) {
+        val registroFamiliar = _puestos.value.firstOrNull { puesto ->
+            normalizarCelular(puesto.celular) == celularLimpio
+        }
+
+        if (registroFamiliar == null) {
+            onResultado(false, "No hay ningún familiar registrado con ese celular.")
+            return
+        }
+
+        val claveEsperada = registroFamiliar.claveActual.ifBlank { "1234" }
+        if (claveLimpia != claveEsperada) {
             onResultado(false, "Contraseña incorrecta.")
             return
         }
 
-        val sesionNueva = SesionConsultaUsuario(
-            titular = puestoCoincidente.titular,
-            celular = celularBuscado,
-            debeCambiarClave = puestoCoincidente.debeCambiarClave
+        _sesionActiva.value = SesionActiva(
+            rol = RolUsuario.USUARIO,
+            nombreMostrado = registroFamiliar.titular,
+            celular = celularLimpio,
+            debeCambiarClave = registroFamiliar.debeCambiarClave
         )
-        _sesionConsulta.value = sesionNueva
-        onResultado(true, "Bienvenido/a, ${puestoCoincidente.titular}.")
+        onResultado(true, "Bienvenido/a, ${registroFamiliar.titular}.")
     }
 
     /**
-     * Devuelve la lista de puestos pertenecientes a un titular específico.
+     * Devuelve los puestos pertenecientes a un titular específico.
      */
     fun obtenerPuestosDeTitular(nombreTitular: String): List<PuestoCadena> {
         val objetivo = nombreTitular.trim()
@@ -666,7 +682,7 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Calcula cuánto debe aportar un titular en la quincena actual.
+     * Calcula el aporte total que debe pagar un titular en la quincena actual.
      */
     fun calcularAporteQuincenalUsuario(nombreTitular: String): Int {
         val registros = obtenerPuestosDeTitular(nombreTitular)
@@ -693,8 +709,8 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Registra en Firestore los datos de acceso (celular, clave inicial y
-     * debeCambiarClave = true) para los puestos de un familiar.
+     * Registra celular, clave inicial y debeCambiarClave = true en los puestos
+     * del familiar en Firestore.
      */
     fun configurarAccesoFamiliar(
         titular: String,
@@ -726,7 +742,7 @@ class CadenaViewModel : ViewModel() {
                 }
 
                 lote.commit().await()
-                _mensajeEstado.value = "Acceso configurado para $titular (cambio obligatorio en 1er ingreso)."
+                _mensajeEstado.value = "Acceso configurado para $titular."
             } catch (e: Exception) {
                 _mensajeEstado.value = "Error al configurar acceso: ${e.localizedMessage}"
             }
@@ -734,22 +750,21 @@ class CadenaViewModel : ViewModel() {
     }
 
     /**
-     * Actualiza la contraseña del usuario en sesión y desactiva la obligación
-     * de cambiar clave en su primer ingreso.
+     * Guarda la nueva contraseña en Firestore y marca debeCambiarClave = false.
      */
     fun completarCambioClaveObligatorio(
         nuevaClave: String,
         onResultado: (Boolean, String) -> Unit = { _, _ -> }
     ) {
-        val sesionActual = _sesionConsulta.value
-        val claveNuevaLimpia = nuevaClave.trim()
+        val actual = _sesionActiva.value
+        val claveLimpia = nuevaClave.trim()
 
-        if (sesionActual == null) {
-            onResultado(false, "No hay una sesión de consulta activa.")
+        if (actual == null || actual.rol != RolUsuario.USUARIO) {
+            onResultado(false, "No hay sesión de usuario activa.")
             return
         }
-        if (claveNuevaLimpia.length < 4) {
-            onResultado(false, "La nueva contraseña debe tener al menos 4 caracteres.")
+        if (claveLimpia.length < 4) {
+            onResultado(false, "La nueva clave debe tener al menos 4 caracteres.")
             return
         }
 
@@ -757,38 +772,34 @@ class CadenaViewModel : ViewModel() {
             try {
                 val snapshot = db.collection("puestos").get().await()
                 val lote = db.batch()
-                val cambiosClave: Map<String, Any> = mapOf(
-                    "claveActual" to claveNuevaLimpia,
+                val cambios: Map<String, Any> = mapOf(
+                    "claveActual" to claveLimpia,
                     "debeCambiarClave" to false
                 )
 
                 for (doc in snapshot.documents) {
                     val nombreDoc = doc.getString("titular")?.trim().orEmpty()
                     val celDoc = normalizarCelular(doc.getString("celular").orEmpty())
-                    val coincideNombre = nombreDoc.equals(sesionActual.titular.trim(), ignoreCase = true)
-                    val coincideCelular = sesionActual.celular.isNotBlank() && celDoc == sesionActual.celular
-
-                    if (coincideNombre || coincideCelular) {
-                        lote.update(doc.reference, cambiosClave)
+                    if (nombreDoc.equals(actual.nombreMostrado.trim(), ignoreCase = true) ||
+                        (actual.celular.isNotBlank() && celDoc == actual.celular)
+                    ) {
+                        lote.update(doc.reference, cambios)
                     }
                 }
 
                 lote.commit().await()
-                _sesionConsulta.value = sesionActual.copy(debeCambiarClave = false)
-                _mensajeEstado.value = "Contraseña actualizada correctamente."
+                _sesionActiva.value = actual.copy(debeCambiarClave = false)
                 onResultado(true, "Contraseña actualizada.")
             } catch (e: Exception) {
-                val msg = "Error al actualizar clave: ${e.localizedMessage}"
-                _mensajeEstado.value = msg
-                onResultado(false, msg)
+                onResultado(false, "Error al actualizar clave: ${e.localizedMessage}")
             }
         }
     }
 
     /**
-     * Cierra la sesión actual de consulta del usuario.
+     * Cierra la sesión activa para volver a la pantalla de login.
      */
-    fun cerrarSesionConsulta() {
-        _sesionConsulta.value = null
+    fun cerrarSesion() {
+        _sesionActiva.value = null
     }
 }

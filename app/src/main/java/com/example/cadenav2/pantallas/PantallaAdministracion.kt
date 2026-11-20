@@ -2,14 +2,15 @@ package com.example.cadenav2.pantallas
 
 // ============================================================================
 // BLOQUE 1: IMPORTACIONES Y ESTRUCTURAS AUXILIARES
-// Aquí importamos las clases de Android, Compose y Material 3 que necesita
-// la pantalla, y definimos tipos simples para ordenar datos y el menú lateral.
+// Importa Compose, Material 3, Android y CadenaViewModel, y define los enums
+// y modelos para la navegación interna, titulares unificados y menú lateral.
 // ============================================================================
-import androidx.activity.compose.BackHandler
+
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -32,8 +33,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountCircle
@@ -64,6 +67,8 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -87,17 +92,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.cadenav2.ui.theme.PaletaRetro90s
 import com.example.cadenav2.viewmodel.CadenaViewModel
+import com.example.cadenav2.viewmodel.PuestoCadena
+import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.launch
 
-// Indica qué pantalla está activa en este momento dentro del flujo de administración
+// Define la subvista activa seleccionada desde el menú lateral del administrador
 private enum class VistaAdminActiva {
     PANEL_GENERAL,
     RESUMEN_CICLO,
@@ -110,7 +118,7 @@ private enum class VistaAdminActiva {
     AJUSTES_CADENA
 }
 
-// Consolida los datos de un titular en la quincena activa (evita sumar doble si tiene varios puestos)
+// Consolida los puestos de un mismo titular en la quincena activa
 private data class ResumenTitularQuincena(
     val titular: String,
     val cantidadPuestos: Int,
@@ -118,7 +126,7 @@ private data class ResumenTitularQuincena(
     val pagado: Boolean
 )
 
-// Representa una opción clickable dentro del menú lateral
+// Representa una opción clickable del menú lateral
 private data class OpcionMenuAdmin(
     val id: String,
     val titulo: String,
@@ -130,7 +138,7 @@ private data class OpcionMenuAdmin(
     val alHacerClic: () -> Unit
 )
 
-// Agrupa varias opciones del menú bajo un título de sección
+// Agrupa opciones del menú bajo una sección
 private data class SeccionMenuAdmin(
     val tituloSeccion: String,
     val opciones: List<OpcionMenuAdmin>
@@ -138,31 +146,26 @@ private data class SeccionMenuAdmin(
 
 // ============================================================================
 // BLOQUE 2: PANTALLA PRINCIPAL, ESTADOS Y CÁLCULOS DE LA QUINCENA
-// Obtenemos los datos del ViewModel y calculamos quién recibe, cuánto se ha
-// recaudado y qué miembros siguen pendientes en la quincena actual.
+// Observa los flujos de CadenaViewModel, agrupa los puestos por titular y
+// calcula quién recibe el pozo, cuánto se ha recaudado y quiénes faltan.
 // ============================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaAdministracion(
     viewModel: CadenaViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onCerrarSesion: () -> Unit = {}
 ) {
-    // Contexto de Android, estado del menú lateral y alcance para animaciones
     val context = LocalContext.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // Guarda qué vista se muestra actualmente (inicia en PANEL_GENERAL)
     var vistaActiva by remember { mutableStateOf(VistaAdminActiva.PANEL_GENERAL) }
-
-    // Guarda el archivo .json elegido antes de confirmar su importación
     var uriRespaldoSeleccionado by remember { mutableStateOf<Uri?>(null) }
-
-    // Controla si se muestra el cuadro de confirmación para cerrar la quincena
     var mostrarDialogoCerrarQuincena by remember { mutableStateOf(false) }
 
-    // Selector para abrir un archivo de respaldo (.json) desde el dispositivo
+    // Selector para elegir un archivo de respaldo (.json)
     val selectorArchivoSubir = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uriElegida: Uri? ->
@@ -171,7 +174,7 @@ fun PantallaAdministracion(
         }
     }
 
-    // Selector para guardar un nuevo archivo de respaldo (.json)
+    // Selector para exportar un archivo de respaldo (.json)
     val selectorArchivoGuardar = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uriDestino: Uri? ->
@@ -180,7 +183,7 @@ fun PantallaAdministracion(
         }
     }
 
-    // Flujos de datos del ViewModel: cambian automáticamente cuando se actualiza Firestore
+    // Observa los flujos de datos del ViewModel
     val puestos by viewModel.puestos.collectAsState()
     val quincenaActual by viewModel.quincenaActual.collectAsState()
     val valorCuotaBase by viewModel.valorCuotaBase.collectAsState()
@@ -203,13 +206,13 @@ fun PantallaAdministracion(
         )
     }
 
-    // Puesto asignado a la quincena activa y titular que cobra el pozo
+    // Determina el puesto y el titular que cobra en la quincena activa
     val puestoQueRecibe = remember(puestos, quincenaActual) {
         puestos.find { it.numeroPuesto == quincenaActual } ?: puestos.firstOrNull()
     }
     val nombreQuienRecibe = puestoQueRecibe?.titular?.trim()?.ifBlank { "Sin asignar" } ?: "Sin asignar"
 
-    // Agrupamos por titular para consolidar puestos, montos y estado de pago
+    // Agrupa por titular para consolidar puestos, montos y estado de pago
     val todosLosMiembros = remember(puestos, valorCuotaBase) {
         puestos
             .filter { it.titular.isNotBlank() }
@@ -217,9 +220,13 @@ fun PantallaAdministracion(
             .map { (_, registrosDelTitular) ->
                 val principal = registrosDelTitular.first()
                 val nombreMostrado = principal.titular.trim()
-                val cantidad = principal.puestosComprados.coerceAtLeast(1)
+                val cantidad = if (registrosDelTitular.size > 1 && registrosDelTitular.all { it.puestosComprados == 1 }) {
+                    registrosDelTitular.size
+                } else {
+                    principal.puestosComprados.coerceAtLeast(registrosDelTitular.size)
+                }
                 val cuotaUnitaria = principal.valorCuotaIndividual.takeIf { it > 0 } ?: valorCuotaBase
-                val monto = if (principal.aporteTotalQuincenal > 0) {
+                val monto = if (principal.aporteTotalQuincenal > 0 && cantidad == principal.puestosComprados) {
                     principal.aporteTotalQuincenal
                 } else {
                     cantidad * cuotaUnitaria
@@ -235,7 +242,7 @@ fun PantallaAdministracion(
             }
     }
 
-    // Datos de quien recibe en la quincena activa (para el interruptor de su propio aporte)
+    // Obtiene el resumen de quien recibe para el interruptor de su aporte
     val resumenQuienRecibe = remember(todosLosMiembros, nombreQuienRecibe, valorCuotaBase) {
         todosLosMiembros.find { it.titular.equals(nombreQuienRecibe, ignoreCase = true) }
             ?: ResumenTitularQuincena(
@@ -246,21 +253,21 @@ fun PantallaAdministracion(
             )
     }
 
-    // Lista de pendientes: excluye a quienes ya pagaron y a quien recibe el pozo esta quincena
+    // Lista de pendientes: excluye a quienes ya pagaron y a quien recibe
     val miembrosPendientes = remember(todosLosMiembros, nombreQuienRecibe) {
         todosLosMiembros.filterNot { miembro ->
             miembro.pagado || miembro.titular.equals(nombreQuienRecibe, ignoreCase = true)
         }
     }
 
-    // Solo se habilita cerrar quincena cuando no quedan pendientes y quien recibe ya aportó
+    // Habilita cerrar quincena cuando no quedan pendientes y quien recibe ya aportó
     val puedeCerrarQuincena = remember(todosLosMiembros, miembrosPendientes, resumenQuienRecibe) {
         todosLosMiembros.isNotEmpty() &&
                 miembrosPendientes.isEmpty() &&
                 resumenQuienRecibe.pagado
     }
 
-    // Totales y barra de avance de lo recaudado en la quincena activa
+    // Totales y barra de avance recaudado en la quincena activa
     val totalEsperadoQuincena = remember(todosLosMiembros) {
         todosLosMiembros.sumOf { it.montoTotal }
     }
@@ -276,11 +283,12 @@ fun PantallaAdministracion(
         0f
     }
 
-    // ============================================================================
-// BLOQUE 3: NAVEGACIÓN A LAS PANTALLAS SECUNDARIAS Y GESTO ATRÁS
-// Intercepta el gesto o botón "Atrás" del teléfono para cerrar el menú si
-// está abierto, o regresar al panel principal antes de salir de la app.
-// ============================================================================
+    // ========================================================================
+    // BLOQUE 3: NAVEGACIÓN INTERNA Y GESTO ATRÁS
+    // Cierra el menú lateral si está abierto o regresa al panel general antes
+    // de delegar el botón atrás al sistema.
+    // ========================================================================
+
     val volverAlPanel: () -> Unit = { vistaActiva = VistaAdminActiva.PANEL_GENERAL }
 
     BackHandler(enabled = drawerState.isOpen || vistaActiva != VistaAdminActiva.PANEL_GENERAL) {
@@ -296,9 +304,10 @@ fun PantallaAdministracion(
 
     // ========================================================================
     // BLOQUE 4: DIÁLOGOS DE CONFIRMACIÓN Y MENÚ LATERAL
-    // Aquí se manejan los cuadros emergentes (subir respaldo / cerrar quincena)
-    // y se arma la lista de secciones y opciones del menú lateral.
+    // Muestra confirmaciones para importar respaldos o cerrar quincena y arma
+    // las secciones del menú lateral.
     // ========================================================================
+
     uriRespaldoSeleccionado?.let { uriPendiente ->
         val nombreArchivo = remember(uriPendiente) {
             obtenerNombreArchivoDesdeUri(context, uriPendiente)
@@ -385,13 +394,13 @@ fun PantallaAdministracion(
         )
     }
 
-    // Cierra el menú lateral y cambia a la pantalla solicitada
+    // Cierra el menú lateral y activa la subvista elegida
     val navegarA: (VistaAdminActiva) -> Unit = { destino ->
         scope.launch { drawerState.close() }
         vistaActiva = destino
     }
 
-    // Secciones del menú lateral replicando las opciones de la V1
+    // Secciones del menú lateral
     val seccionesMenu = remember(
         cargando,
         quincenaActual,
@@ -399,7 +408,8 @@ fun PantallaAdministracion(
         montoRecaudado,
         miembrosPagaronCount,
         todosLosMiembros.size,
-        vistaActiva
+        vistaActiva,
+        onCerrarSesion
     ) {
         listOf(
             SeccionMenuAdmin(
@@ -443,6 +453,7 @@ fun PantallaAdministracion(
                         subtitulo = "Registrar un nuevo titular o puesto",
                         icono = Icons.Default.Add,
                         tonoIcono = PaletaRetro90s.vino,
+                        resaltada = vistaActiva == VistaAdminActiva.GESTION_MIEMBROS_AGREGAR,
                         alHacerClic = { navegarA(VistaAdminActiva.GESTION_MIEMBROS_AGREGAR) }
                     ),
                     OpcionMenuAdmin(
@@ -451,6 +462,7 @@ fun PantallaAdministracion(
                         subtitulo = "Modificar nombre o cantidad de puestos",
                         icono = Icons.Default.Create,
                         tonoIcono = PaletaRetro90s.ciruela,
+                        resaltada = vistaActiva == VistaAdminActiva.GESTION_MIEMBROS_EDITAR,
                         alHacerClic = { navegarA(VistaAdminActiva.GESTION_MIEMBROS_EDITAR) }
                     ),
                     OpcionMenuAdmin(
@@ -459,6 +471,7 @@ fun PantallaAdministracion(
                         subtitulo = "Cambiar la quincena de cobro entre dos familiares",
                         icono = Icons.Default.Refresh,
                         tonoIcono = PaletaRetro90s.naranja,
+                        resaltada = vistaActiva == VistaAdminActiva.GESTION_MIEMBROS_TURNOS,
                         alHacerClic = { navegarA(VistaAdminActiva.GESTION_MIEMBROS_TURNOS) }
                     ),
                     OpcionMenuAdmin(
@@ -467,6 +480,7 @@ fun PantallaAdministracion(
                         subtitulo = "Quitar un familiar de la cadena",
                         icono = Icons.Default.Delete,
                         tonoIcono = PaletaRetro90s.rojo,
+                        resaltada = vistaActiva == VistaAdminActiva.GESTION_MIEMBROS_ELIMINAR,
                         alHacerClic = { navegarA(VistaAdminActiva.GESTION_MIEMBROS_ELIMINAR) }
                     )
                 )
@@ -480,6 +494,7 @@ fun PantallaAdministracion(
                         subtitulo = "Activar o desactivar aportes ya registrados",
                         icono = Icons.Default.AccountCircle,
                         tonoIcono = PaletaRetro90s.vino,
+                        resaltada = vistaActiva == VistaAdminActiva.CORREGIR_PAGOS,
                         alHacerClic = { navegarA(VistaAdminActiva.CORREGIR_PAGOS) }
                     ),
                     OpcionMenuAdmin(
@@ -504,6 +519,7 @@ fun PantallaAdministracion(
                         subtitulo = "Cuota base, quincena activa y cierre total",
                         icono = Icons.Default.Settings,
                         tonoIcono = PaletaRetro90s.ciruela,
+                        resaltada = vistaActiva == VistaAdminActiva.AJUSTES_CADENA,
                         alHacerClic = { navegarA(VistaAdminActiva.AJUSTES_CADENA) }
                     )
                 )
@@ -539,13 +555,24 @@ fun PantallaAdministracion(
                 )
             ),
             SeccionMenuAdmin(
-                tituloSeccion = "CIERRE DE CICLO",
+                tituloSeccion = "SESIÓN Y CICLO",
                 opciones = listOf(
+                    OpcionMenuAdmin(
+                        id = "cerrar_sesion_admin",
+                        titulo = "Cerrar sesión",
+                        subtitulo = "Volver a la pantalla de inicio de sesión",
+                        icono = Icons.AutoMirrored.Filled.ExitToApp,
+                        tonoIcono = PaletaRetro90s.vino,
+                        alHacerClic = {
+                            scope.launch { drawerState.close() }
+                            onCerrarSesion()
+                        }
+                    ),
                     OpcionMenuAdmin(
                         id = "finalizar_limpiar_cadena",
                         titulo = "Finalizar y limpiar cadena",
                         subtitulo = "Abrir sección de cierre con doble confirmación",
-                        icono = Icons.AutoMirrored.Filled.ExitToApp,
+                        icono = Icons.Default.Delete,
                         tonoIcono = PaletaRetro90s.rojo,
                         alHacerClic = { navegarA(VistaAdminActiva.AJUSTES_CADENA) }
                     )
@@ -555,10 +582,11 @@ fun PantallaAdministracion(
     }
 
     // ========================================================================
-    // BLOQUE 5: ESTRUCTURA VISUAL PRINCIPAL (SCAFFOLD Y LISTA DE PENDIENTES)
-    // Dibuja la barra superior, la tarjeta de quien recibe, el botón de cerrar
-    // quincena (cuando todo está al día) y la lista de miembros pendientes.
+    // BLOQUE 5: ESTRUCTURA VISUAL PRINCIPAL Y ENRUTAMIENTO DE VISTAS DEL MENÚ
+    // Abre el menú lateral con el botón superior o gesto, y muestra ya sea el
+    // panel general de cobros o la vista seleccionada desde el menú lateral.
     // ========================================================================
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = true,
@@ -572,12 +600,22 @@ fun PantallaAdministracion(
             topBar = {
                 TopAppBar(
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(
-                                imageVector = Icons.Default.Menu,
-                                contentDescription = "Abrir menú",
-                                tint = PaletaRetro90s.textoOscuro
-                            )
+                        if (vistaActiva == VistaAdminActiva.PANEL_GENERAL) {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(
+                                    imageVector = Icons.Default.Menu,
+                                    contentDescription = "Abrir menú",
+                                    tint = PaletaRetro90s.textoOscuro
+                                )
+                            }
+                        } else {
+                            IconButton(onClick = volverAlPanel) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Volver al panel general",
+                                    tint = PaletaRetro90s.textoOscuro
+                                )
+                            }
                         }
                     },
                     title = {
@@ -586,13 +624,15 @@ fun PantallaAdministracion(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "Quincena $quincenaActual",
+                                text = tituloVistaActiva(vistaActiva, quincenaActual),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = PaletaRetro90s.textoOscuro
+                                color = PaletaRetro90s.textoOscuro,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${puestos.size.coerceAtLeast(18)} puestos en total",
+                                text = "${puestos.size} puestos · Quincena $quincenaActual",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = PaletaRetro90s.textoOscuro
                             )
@@ -632,7 +672,7 @@ fun PantallaAdministracion(
                 ) {
                     CircularProgressIndicator(color = PaletaRetro90s.vino)
                 }
-            } else {
+            } else if (vistaActiva == VistaAdminActiva.PANEL_GENERAL) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -732,16 +772,584 @@ fun PantallaAdministracion(
 
                     item { Spacer(modifier = Modifier.height(16.dp)) }
                 }
+            } else {
+                VistaSecundariaAdministrador(
+                    vistaActiva = vistaActiva,
+                    puestos = puestos,
+                    miembros = todosLosMiembros,
+                    quincenaActual = quincenaActual,
+                    valorCuotaBase = valorCuotaBase,
+                    montoRecaudado = montoRecaudado,
+                    totalEsperado = totalEsperadoQuincena,
+                    mensajeEstado = mensajeEstado,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    onVolverPanel = volverAlPanel,
+                    onAgregarFamiliar = { titular, puestosCant, numeroTurno, cuota, celular, clave ->
+                        viewModel.guardarFamiliar(
+                            titular = titular,
+                            puestosComprados = puestosCant,
+                            numeroPuesto = numeroTurno,
+                            valorCuota = cuota,
+                            celular = celular,
+                            claveInicial = clave
+                        )
+                    },
+                    onEditarFamiliar = { anterior, nuevo, puestosCant, cuota ->
+                        viewModel.editarFamiliar(
+                            titularAnterior = anterior,
+                            nuevoTitular = nuevo,
+                            puestosComprados = puestosCant,
+                            valorCuota = cuota
+                        )
+                    },
+                    onIntercambiarTurnos = { primero, segundo ->
+                        viewModel.intercambiarTurnos(primero, segundo)
+                    },
+                    onEliminarFamiliar = { titular ->
+                        viewModel.eliminarFamiliar(titular)
+                    },
+                    onAlternarPago = { titular, pagado ->
+                        viewModel.alternarPagoTitular(titular, pagado)
+                    },
+                    onGuardarAjustes = { nuevaCuota, nuevaQuincena ->
+                        viewModel.guardarAjustesCadena(nuevaCuota, nuevaQuincena)
+                    },
+                    onLimpiarCadena = {
+                        viewModel.finalizarYLimpiarCadena()
+                    }
+                )
             }
         }
     }
 }
 
 // ============================================================================
-// BLOQUE 6: COMPONENTES REUTILIZABLES Y FUNCIONES DE APOYO
-// Piezas visuales reutilizables (tarjeta superior, fila de miembro, menú lateral)
-// y funciones auxiliares para formato de moneda, idioma y nombres de archivos.
+// BLOQUE 6: VISTAS SECUNDARIAS DEL MENÚ LATERAL
+// Renderiza el contenido específico para cada opción del menú lateral y
+// permite volver al panel general en cualquier momento.
 // ============================================================================
+
+@Composable
+private fun VistaSecundariaAdministrador(
+    vistaActiva: VistaAdminActiva,
+    puestos: List<PuestoCadena>,
+    miembros: List<ResumenTitularQuincena>,
+    quincenaActual: Int,
+    valorCuotaBase: Int,
+    montoRecaudado: Int,
+    totalEsperado: Int,
+    mensajeEstado: String,
+    modifier: Modifier = Modifier,
+    onVolverPanel: () -> Unit,
+    onAgregarFamiliar: (String, Int, Int, Int, String, String) -> Unit,
+    onEditarFamiliar: (String, String, Int, Int) -> Unit,
+    onIntercambiarTurnos: (String, String) -> Unit,
+    onEliminarFamiliar: (String) -> Unit,
+    onAlternarPago: (String, Boolean) -> Unit,
+    onGuardarAjustes: (Int, Int) -> Unit,
+    onLimpiarCadena: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        OutlinedButton(
+            onClick = onVolverPanel,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.2.dp, PaletaRetro90s.vino)
+        ) {
+            Text(
+                text = "Volver al panel general",
+                fontWeight = FontWeight.Bold,
+                color = PaletaRetro90s.vino
+            )
+        }
+
+        when (vistaActiva) {
+            VistaAdminActiva.PANEL_GENERAL -> Unit
+
+            VistaAdminActiva.RESUMEN_CICLO -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = PaletaRetro90s.amarillo),
+                    border = BorderStroke(1.5.dp, PaletaRetro90s.naranja)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "RESUMEN DEL CICLO · QUINCENA $quincenaActual",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PaletaRetro90s.textoOscuro
+                        )
+                        Text(
+                            text = "Titulares registrados: ${miembros.size}",
+                            color = PaletaRetro90s.textoOscuro
+                        )
+                        Text(
+                            text = "Puestos totales: ${puestos.size}",
+                            color = PaletaRetro90s.textoOscuro
+                        )
+                        Text(
+                            text = "Recaudado: ${formatearPesos(montoRecaudado)} de ${formatearPesos(totalEsperado)}",
+                            fontWeight = FontWeight.Bold,
+                            color = PaletaRetro90s.vino
+                        )
+                    }
+                }
+            }
+
+            VistaAdminActiva.CRONOGRAMA_GLOBAL -> {
+                puestos.sortedBy { it.numeroPuesto }.forEach { puesto ->
+                    val esTurnoActual = puesto.numeroPuesto == quincenaActual
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (esTurnoActual) PaletaRetro90s.amarillo else PaletaRetro90s.fondoCrema
+                        ),
+                        border = BorderStroke(1.2.dp, PaletaRetro90s.naranja)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Quincena #${puesto.numeroPuesto} · ${puesto.titular}",
+                                    fontWeight = FontWeight.Bold,
+                                    color = PaletaRetro90s.textoOscuro
+                                )
+                                Text(
+                                    text = "Puestos: ${puesto.puestosComprados} · Aporte: ${formatearPesos(puesto.aporteTotalQuincenal)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PaletaRetro90s.textoOscuro
+                                )
+                            }
+                            Text(
+                                text = if (esTurnoActual) "COBRA HOY" else "TURNO",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = PaletaRetro90s.vino
+                            )
+                        }
+                    }
+                }
+            }
+
+            VistaAdminActiva.GESTION_MIEMBROS_AGREGAR -> {
+                var titular by remember { mutableStateOf("") }
+                var puestosTexto by remember { mutableStateOf("1") }
+                var turnoTexto by remember { mutableStateOf("${puestos.size + 1}") }
+                var cuotaTexto by remember { mutableStateOf("$valorCuotaBase") }
+                var celularTexto by remember { mutableStateOf("") }
+                var claveTexto by remember { mutableStateOf("1234") }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = PaletaRetro90s.fondoCrema),
+                    border = BorderStroke(1.2.dp, PaletaRetro90s.naranja)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Nuevo familiar",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PaletaRetro90s.vino
+                        )
+                        OutlinedTextField(
+                            value = titular,
+                            onValueChange = { titular = it },
+                            label = { Text("Nombre del titular") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = puestosTexto,
+                            onValueChange = { puestosTexto = it },
+                            label = { Text("Puestos comprados") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = turnoTexto,
+                            onValueChange = { turnoTexto = it },
+                            label = { Text("Número de puesto / quincena") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = cuotaTexto,
+                            onValueChange = { cuotaTexto = it },
+                            label = { Text("Valor cuota por puesto") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = celularTexto,
+                            onValueChange = { celularTexto = it },
+                            label = { Text("Celular del familiar") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = claveTexto,
+                            onValueChange = { claveTexto = it },
+                            label = { Text("Clave inicial") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(
+                            onClick = {
+                                if (titular.isNotBlank()) {
+                                    onAgregarFamiliar(
+                                        titular.trim(),
+                                        puestosTexto.toIntOrNull() ?: 1,
+                                        turnoTexto.toIntOrNull() ?: (puestos.size + 1),
+                                        cuotaTexto.toIntOrNull() ?: valorCuotaBase,
+                                        celularTexto.trim(),
+                                        claveTexto.trim().ifBlank { "1234" }
+                                    )
+                                    titular = ""
+                                    celularTexto = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PaletaRetro90s.vino,
+                                contentColor = PaletaRetro90s.textoClaro
+                            )
+                        ) {
+                            Text("Guardar familiar", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            VistaAdminActiva.GESTION_MIEMBROS_EDITAR -> {
+                var titularAnterior by remember { mutableStateOf(miembros.firstOrNull()?.titular.orEmpty()) }
+                var nuevoTitular by remember { mutableStateOf(miembros.firstOrNull()?.titular.orEmpty()) }
+                var puestosTexto by remember { mutableStateOf("${miembros.firstOrNull()?.cantidadPuestos ?: 1}") }
+                var cuotaTexto by remember { mutableStateOf("$valorCuotaBase") }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = PaletaRetro90s.fondoCrema),
+                    border = BorderStroke(1.2.dp, PaletaRetro90s.naranja)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Editar familiar",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PaletaRetro90s.vino
+                        )
+                        OutlinedTextField(
+                            value = titularAnterior,
+                            onValueChange = { titularAnterior = it },
+                            label = { Text("Titular actual") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = nuevoTitular,
+                            onValueChange = { nuevoTitular = it },
+                            label = { Text("Nuevo nombre") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = puestosTexto,
+                            onValueChange = { puestosTexto = it },
+                            label = { Text("Puestos comprados") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = cuotaTexto,
+                            onValueChange = { cuotaTexto = it },
+                            label = { Text("Cuota individual") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(
+                            onClick = {
+                                if (titularAnterior.isNotBlank() && nuevoTitular.isNotBlank()) {
+                                    onEditarFamiliar(
+                                        titularAnterior.trim(),
+                                        nuevoTitular.trim(),
+                                        puestosTexto.toIntOrNull() ?: 1,
+                                        cuotaTexto.toIntOrNull() ?: valorCuotaBase
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PaletaRetro90s.ciruela,
+                                contentColor = PaletaRetro90s.textoClaro
+                            )
+                        ) {
+                            Text("Guardar cambios", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            VistaAdminActiva.GESTION_MIEMBROS_TURNOS -> {
+                var primero by remember { mutableStateOf("") }
+                var segundo by remember { mutableStateOf("") }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = PaletaRetro90s.fondoCrema),
+                    border = BorderStroke(1.2.dp, PaletaRetro90s.naranja)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Intercambiar turnos",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PaletaRetro90s.vino
+                        )
+                        OutlinedTextField(
+                            value = primero,
+                            onValueChange = { primero = it },
+                            label = { Text("Primer familiar") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = segundo,
+                            onValueChange = { segundo = it },
+                            label = { Text("Segundo familiar") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(
+                            onClick = {
+                                if (primero.isNotBlank() && segundo.isNotBlank()) {
+                                    onIntercambiarTurnos(primero.trim(), segundo.trim())
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PaletaRetro90s.naranja,
+                                contentColor = PaletaRetro90s.textoClaro
+                            )
+                        ) {
+                            Text("Intercambiar puestos", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            VistaAdminActiva.GESTION_MIEMBROS_ELIMINAR -> {
+                miembros.forEach { miembro ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = PaletaRetro90s.fondoCrema),
+                        border = BorderStroke(1.2.dp, PaletaRetro90s.rojo)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = miembro.titular,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PaletaRetro90s.textoOscuro
+                                )
+                                Text(
+                                    text = "${miembro.cantidadPuestos} puestos · ${formatearPesos(miembro.montoTotal)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PaletaRetro90s.textoOscuro
+                                )
+                            }
+                            Button(
+                                onClick = { onEliminarFamiliar(miembro.titular) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = PaletaRetro90s.rojo,
+                                    contentColor = PaletaRetro90s.textoClaro
+                                )
+                            ) {
+                                Text("Eliminar")
+                            }
+                        }
+                    }
+                }
+            }
+
+            VistaAdminActiva.CORREGIR_PAGOS -> {
+                miembros.forEach { miembro ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = PaletaRetro90s.fondoCrema),
+                        border = BorderStroke(1.2.dp, PaletaRetro90s.naranja)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = miembro.titular,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PaletaRetro90s.textoOscuro
+                                )
+                                Text(
+                                    text = "${formatearPesos(miembro.montoTotal)} · ${if (miembro.pagado) "Pagado" else "Pendiente"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PaletaRetro90s.textoOscuro
+                                )
+                            }
+                            Switch(
+                                checked = miembro.pagado,
+                                onCheckedChange = { marcado ->
+                                    onAlternarPago(miembro.titular, marcado)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            VistaAdminActiva.AJUSTES_CADENA -> {
+                var cuotaTexto by remember { mutableStateOf("$valorCuotaBase") }
+                var quincenaTexto by remember { mutableStateOf("$quincenaActual") }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = PaletaRetro90s.fondoCrema),
+                    border = BorderStroke(1.2.dp, PaletaRetro90s.naranja)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Ajustes de la cadena",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PaletaRetro90s.vino
+                        )
+                        OutlinedTextField(
+                            value = cuotaTexto,
+                            onValueChange = { cuotaTexto = it },
+                            label = { Text("Cuota base por puesto") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = quincenaTexto,
+                            onValueChange = { quincenaTexto = it },
+                            label = { Text("Quincena actual") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(
+                            onClick = {
+                                onGuardarAjustes(
+                                    cuotaTexto.toIntOrNull() ?: valorCuotaBase,
+                                    (quincenaTexto.toIntOrNull() ?: quincenaActual).coerceAtLeast(1)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PaletaRetro90s.vino,
+                                contentColor = PaletaRetro90s.textoClaro
+                            )
+                        ) {
+                            Text("Guardar ajustes", fontWeight = FontWeight.Bold)
+                        }
+
+                        HorizontalDivider(color = PaletaRetro90s.naranja.copy(alpha = 0.4f))
+
+                        Button(
+                            onClick = onLimpiarCadena,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PaletaRetro90s.rojo,
+                                contentColor = PaletaRetro90s.textoClaro
+                            )
+                        ) {
+                            Text("Finalizar y limpiar cadena", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (mensajeEstado.isNotBlank()) {
+            Text(
+                text = mensajeEstado,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = PaletaRetro90s.vino
+            )
+        }
+    }
+}
+
+// ============================================================================
+// BLOQUE 7: COMPONENTES REUTILIZABLES, UTILIDADES Y PREVISUALIZACIÓN
+// Dibuja la tarjeta de quien recibe, cada fila consolidada por titular, el
+// menú lateral, utilidades de formato y una @Preview en Compose.
+// ============================================================================
+
+private fun tituloVistaActiva(vista: VistaAdminActiva, quincena: Int): String {
+    return when (vista) {
+        VistaAdminActiva.PANEL_GENERAL -> "Quincena $quincena"
+        VistaAdminActiva.RESUMEN_CICLO -> "Resumen del ciclo"
+        VistaAdminActiva.CRONOGRAMA_GLOBAL -> "Cronograma global"
+        VistaAdminActiva.GESTION_MIEMBROS_AGREGAR -> "Añadir familiar"
+        VistaAdminActiva.GESTION_MIEMBROS_EDITAR -> "Editar familiar"
+        VistaAdminActiva.GESTION_MIEMBROS_TURNOS -> "Intercambiar turnos"
+        VistaAdminActiva.GESTION_MIEMBROS_ELIMINAR -> "Eliminar familiar"
+        VistaAdminActiva.CORREGIR_PAGOS -> "Corregir pagos Q#$quincena"
+        VistaAdminActiva.AJUSTES_CADENA -> "Ajustes de la cadena"
+    }
+}
 
 @Composable
 private fun TarjetaRecibeQuincenaRetro90s(
@@ -1048,18 +1656,15 @@ private fun MenuLateralAdministrador(
     }
 }
 
-// Crea una configuración regional para español de Colombia compatible con API 26+
 private fun localeColombia(): Locale {
     return Locale.Builder().setLanguage("es").setRegion("CO").build()
 }
 
-// Convierte un número entero (ej. 50000) a formato de moneda ("$50.000")
 private fun formatearPesos(valor: Int): String {
     val formato = NumberFormat.getNumberInstance(localeColombia())
     return "$${formato.format(valor)}"
 }
 
-// Busca el nombre visible de un archivo a partir de su Uri en Android
 private fun obtenerNombreArchivoDesdeUri(context: Context, uri: Uri): String {
     var nombre = "archivo_respaldo.json"
     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -1069,4 +1674,18 @@ private fun obtenerNombreArchivoDesdeUri(context: Context, uri: Uri): String {
         }
     }
     return nombre
+}
+
+@Preview(showBackground = true, name = "Fila Miembro Unificado Retro 90s")
+@Composable
+private fun PreviewFilaMiembroRetro90s() {
+    FilaMiembroPagoRetro90s(
+        miembro = ResumenTitularQuincena(
+            titular = "Erika",
+            cantidadPuestos = 2,
+            montoTotal = 100000,
+            pagado = false
+        ),
+        onAlternarPago = {}
+    )
 }

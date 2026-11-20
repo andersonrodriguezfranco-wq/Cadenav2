@@ -2,8 +2,8 @@ package com.example.cadenav2.pantallas
 
 // ============================================================================
 // BLOQUE 1: IMPORTACIONES Y CONFIGURACIÓN DEL ARCHIVO
-// Reúne únicamente los componentes de Jetpack Compose, Material 3, íconos,
-// la paleta retro de los 90 y el ViewModel para consultar los datos en vivo.
+// Reúne los componentes de Jetpack Compose, Material 3, íconos, herramientas
+// de vista previa (@Preview), la paleta retro de los 90 y el ViewModel.
 // ============================================================================
 
 import androidx.compose.foundation.BorderStroke
@@ -53,20 +53,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.cadenav2.ui.theme.PaletaRetro90s
 import com.example.cadenav2.viewmodel.CadenaViewModel
+import com.example.cadenav2.viewmodel.PuestoCadena
 import java.text.NumberFormat
 import java.util.Locale
 
 // ============================================================================
-// BLOQUE 2: PANTALLA PRINCIPAL DE CONSULTA Y CÁLCULOS DE CUENTA
-// Filtra los puestos del familiar consultado, calcula su aporte quincenal,
-// revisa si está al día en la quincena activa y prepara los datos de
-// solo lectura para evitar cualquier modificación indebida desde la consulta.
+// BLOQUE 2: PUNTO DE ENTRADA CON VIEWMODEL Y CONTENIDO VISUAL DE CONSULTA
+// Conecta el estado reactivo de CadenaViewModel con el composable visual puro,
+// permitiendo tanto el uso en tiempo real como la previsualización en Android Studio.
 // ============================================================================
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaConsultaUsuario(
     viewModel: CadenaViewModel,
@@ -81,6 +81,30 @@ fun PantallaConsultaUsuario(
     val quincenaActual by viewModel.quincenaActual.collectAsState()
     val valorCuotaBase by viewModel.valorCuotaBase.collectAsState()
 
+    ContenidoConsultaUsuario(
+        puestos = puestos,
+        quincenaActual = quincenaActual,
+        valorCuotaBase = valorCuotaBase,
+        nombreFamiliar = nombreFamiliar,
+        modifier = modifier,
+        celularFamiliar = celularFamiliar,
+        onAbrirCambioClave = onAbrirCambioClave,
+        onCerrarSesion = onCerrarSesion
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ContenidoConsultaUsuario(
+    puestos: List<PuestoCadena>,
+    quincenaActual: Int,
+    valorCuotaBase: Int,
+    nombreFamiliar: String,
+    modifier: Modifier = Modifier,
+    celularFamiliar: String = "",
+    onAbrirCambioClave: () -> Unit = {},
+    onCerrarSesion: () -> Unit = {}
+) {
     // Filtramos los registros de puestos correspondientes al familiar consultado
     val misRegistros = remember(puestos, nombreFamiliar) {
         puestos.filter { puesto ->
@@ -565,9 +589,9 @@ fun PantallaConsultaUsuario(
 }
 
 // ============================================================================
-// BLOQUE 6: COMPONENTES AUXILIARES DE APOYO Y FORMATEO DE MONEDA
-// Proporciona filas de lectura alineadas y el formato de moneda en pesos
-// colombianos para mantener limpia la pantalla principal de consulta.
+// BLOQUE 6: COMPONENTES AUXILIARES, FORMATEO Y VISTAS PREVIAS (@PREVIEW)
+// Proporciona filas de lectura, formato de moneda y previsualizaciones con
+// datos de ejemplo para inspeccionar el diseño en Android Studio.
 // ============================================================================
 
 @Composable
@@ -601,4 +625,37 @@ private fun localeColombiaConsulta(): Locale {
 private fun formatearPesosConsulta(valor: Int): String {
     val formato = NumberFormat.getNumberInstance(localeColombiaConsulta())
     return "$${formato.format(valor)}"
+}
+
+@Preview(showBackground = true, name = "Consulta Usuario - Turno Activo")
+@Composable
+private fun PreviewPantallaConsultaUsuario() {
+    val puestosEjemplo = listOf(
+        PuestoCadena(
+            id = "1",
+            numeroPuesto = 2,
+            titular = "Maye",
+            puestosComprados = 1,
+            valorCuotaIndividual = 50000,
+            aporteTotalQuincenal = 50000,
+            pagadoQuincenaActual = true
+        ),
+        PuestoCadena(
+            id = "2",
+            numeroPuesto = 4,
+            titular = "Erika",
+            puestosComprados = 2,
+            valorCuotaIndividual = 50000,
+            aporteTotalQuincenal = 100000,
+            pagadoQuincenaActual = false
+        )
+    )
+
+    ContenidoConsultaUsuario(
+        puestos = puestosEjemplo,
+        quincenaActual = 2,
+        valorCuotaBase = 50000,
+        nombreFamiliar = "Maye",
+        celularFamiliar = "300 123 4567"
+    )
 }
